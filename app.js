@@ -1,5 +1,6 @@
 // app
 // external modules
+var util = require('util');
 var async = require('async');
 var mongoose = require('mongoose');
 var pg = require('pg');
@@ -26,14 +27,9 @@ var Temp = require("./lib/temp.js");
 var models = require("./lib/models");
 
 // session store
-try {
-    var sessionStore = new SequelizeStore({
-        db: models.sequelize
-    });
-    logger.info('new SequelizeStore success!');
-} catch (err) {
-    return logger.error('new SequelizeStore failed: ' + err);
-}
+var sessionStore = new SequelizeStore({
+    db: models.sequelize
+});
 
 // sessions
 function migrateSessions(callback) {
@@ -141,6 +137,139 @@ function migrateTemps(callback) {
     });
 }
 
+// users
+function migrateUsers(callback) {
+    logger.info('> migrate users from old db mongodb to new db postgresql');
+    User.model.find({}).sort({created: 1}).exec(function (err, users) {
+        if (err) {
+            logger.error('find users in old db mongodb failed: ' + err);
+            return callback(err);
+        }
+        if (users.length <= 0) {
+            logger.info('not found any users!');
+            return callback();
+        }
+        logger.info('found ' + users.length + ' users!');
+        async.forEachOfSeries(users, function (user, key, _callback) {
+            models.User.findOrCreate({
+                where: {
+                    profileid: user.id
+                },
+                defaults: {
+                    profileid: user.id,
+                    profile: user.profile,
+                    history: user.history,
+                    createdAt: user.created,
+                    updatedAt: user.created
+                },
+                silent: true
+            }).spread(function (user, created) {
+                if (!created) {
+                    logger.info('user already exists: ' + user.profileid);
+                }
+                return _callback();
+            }).catch(function (err) {
+                return _callback(err);
+            });
+        }, function (err) {
+            if (err) {
+                logger.error('migrate users failed: ' + err);
+                return callback(err);
+            }
+            models.User.count().then(function (count) {
+                logger.info('migrate users success: ' + count + '/' + users.length);
+                return callback();
+            }).catch(function (err) {
+                logger.error('count new db postgresql users failed: ' + err);
+                return callback(err);
+            });
+        });
+    });
+}
+
+// notes
+function migrateNotesFromMongoDB(callback) {
+    logger.info('> migrate notes from old db mongodb to new db postgresql');
+    Note.model.find({}).sort({created: 1}).exec(function (err, notes) {
+        if (err) {
+            logger.error('find notes in old db mongodb failed: ' + err);
+            return callback(err);
+        }
+        if (notes.length <= 0) {
+            logger.info('not found any notes!');
+            return callback();
+        }
+        logger.info('found ' + notes.length + ' notes!');
+        return callback();
+//        async.forEachOfSeries(notes, function (note, key, _callback) {
+//            models.User.findOrCreate({
+//                where: {
+//                    profileid: user.id
+//                },
+//                defaults: {
+//                    profileid: user.id,
+//                    profile: user.profile,
+//                    history: user.history,
+//                    createdAt: user.created,
+//                    updatedAt: user.created
+//                },
+//                silent: true
+//            }).spread(function (user, created) {
+//                if (!created) {
+//                    logger.info('user already exists: ' + user.profileid);
+//                }
+//                return _callback();
+//            }).catch(function (err) {
+//                return _callback(err);
+//            });
+//        }, function (err) {
+//            if (err) {
+//                logger.error('migrate users failed: ' + err);
+//                return callback(err);
+//            }
+//            models.User.count().then(function (count) {
+//                logger.info('migrate users success: ' + count + '/' + users.length);
+//                return callback();
+//            }).catch(function (err) {
+//                logger.error('count new db postgresql users failed: ' + err);
+//                return callback(err);
+//            });
+//        });
+    });
+}
+
+// notes
+function migrateNotesFromPostgreSQL(callback) {
+    logger.info('> migrate notes from old db postgresql to new db postgresql');
+    var client = new pg.Client(config.old_db_postgresql);
+    client.connect(function (err) {
+        if (err) {
+            client.end();
+            logger.error('connect to old db postgresql failed: ' + err);
+            return callback(err);
+        }
+        var selectquery = "SELECT * FROM notes ORDER BY create_time ASC;";
+        client.query(selectquery, function (err, result) {
+            client.end();
+            if (err) {
+                logger.error('select notes in the old db postgresql failed: ' + err);
+                return callback(err);
+            }
+            if (result.rows.length <= 0) {
+                logger.info('not found any notes!');
+                return callback();
+            } else {
+                logger.info('found ' + result.rows.length + ' notes!');
+                return callback();
+//                    for (var i = 0, l = result.rows.length; i < l; i++) {
+//                        var note = result.rows[i];
+//                        // find or create owner
+//                    }
+            }
+        });
+    });
+}
+
 // sync new db models
 models.sequelize.sync().then(function () {
     logger.info('connect to new db postgresql and sync success!');
@@ -149,67 +278,37 @@ models.sequelize.sync().then(function () {
         mongoose.connect(config.old_db_mongodb);
         logger.info('connect to old db mongodb success!');
     } catch (err) {
-        return logger.error('connect to old db mongodb failed: ' + err);
+        logger.error('connect to old db mongodb failed: ' + err);
+        throw err;
     }
     // connect to the old db postgresql
     var client = new pg.Client(config.old_db_postgresql);
     client.connect(function (err) {
-        if (err) return logger.error('connect to old db postgresql failed: ' + err);
+        client.end();
+        if (err) {
+            logger.error('connect to old db postgresql failed: ' + err);
+            throw err;
+        }
         logger.info('connect to old db postgresql success!');
         logger.info('---start migration---');
         async.series({
             migrateSessions: migrateSessions,
-            migrateTemps: migrateTemps
+            migrateTemps: migrateTemps,
+            migrateUsers: migrateUsers,
+            migrateNotesFromMongoDB: migrateNotesFromMongoDB,
+            migrateNotesFromPostgreSQL: migrateNotesFromPostgreSQL
         }, function(err, results) {
             if (err) {
-                logger.error('migration failed: ' + err);
-                process.exit(1);
+                throw err;
             } else {
                 logger.info('---migration complete---');
                 process.exit(0);
             }
         });
-                     
-        // user
-        //logger.info('---users from old db mongodb to new db postgresql---');
-//        var selectquery = "SELECT * FROM user;";
-//        client.query(selectquery, function (err, result) {
-//            client.end();
-//            if (err) {
-//                return logger.error('select notes in the old db postgresql failed: ' + err);
-//            } else {
-//                if (result.rows.length <= 0) {
-//                    logger.info('not found any notes!');
-//                } else {
-//                    logger.info('found ' + result.rows.length + ' notes!');
-//                    for (var i = 0, l = result.rows.length; i < l; i++) {
-//                        var note = result.rows[i];
-//                        // find or create owner
-//                    }
-//                }
-//            }
-//        });
-//        // note
-//        var selectquery = "SELECT * FROM notes;";
-//        client.query(selectquery, function (err, result) {
-//            client.end();
-//            if (err) {
-//                return logger.error('select notes in the old db postgresql failed: ' + err);
-//            } else {
-//                if (result.rows.length <= 0) {
-//                    logger.info('not found any notes!');
-//                } else {
-//                    logger.info('found ' + result.rows.length + ' notes!');
-//                    for (var i = 0, l = result.rows.length; i < l; i++) {
-//                        var note = result.rows[i];
-//                        // find or create owner
-//                    }
-//                }
-//            }
-//        });
     });
 }).catch(function (err) {
-    return logger.error('new db sync failed: ' + err);
+    logger.error('migration failed: ' + util.inspect(err));
+    process.exit(1);
 });
 
 // log uncaught exception
