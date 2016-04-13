@@ -187,10 +187,10 @@ function migrateUsers(callback) {
     });
 }
 
-// notes
+// notes from mongodb
 function migrateNotesFromMongoDB(callback) {
     logger.info('> migrate notes from old db mongodb to new db postgresql');
-    Note.model.find({}).sort({created: 1}).exec(function (err, notes) {
+    Note.model.find({}).populate('lastchangeuser').sort({created: 1}).exec(function (err, notes) {
         if (err) {
             logger.error('find notes in old db mongodb failed: ' + err);
             return callback(err);
@@ -200,45 +200,81 @@ function migrateNotesFromMongoDB(callback) {
             return callback();
         }
         logger.info('found ' + notes.length + ' notes!');
-        return callback();
-//        async.forEachOfSeries(notes, function (note, key, _callback) {
-//            models.User.findOrCreate({
-//                where: {
-//                    profileid: user.id
-//                },
-//                defaults: {
-//                    profileid: user.id,
-//                    profile: user.profile,
-//                    history: user.history,
-//                    createdAt: user.created,
-//                    updatedAt: user.created
-//                },
-//                silent: true
-//            }).spread(function (user, created) {
-//                if (!created) {
-//                    logger.info('user already exists: ' + user.profileid);
-//                }
-//                return _callback();
-//            }).catch(function (err) {
-//                return _callback(err);
-//            });
-//        }, function (err) {
-//            if (err) {
-//                logger.error('migrate users failed: ' + err);
-//                return callback(err);
-//            }
-//            models.User.count().then(function (count) {
-//                logger.info('migrate users success: ' + count + '/' + users.length);
-//                return callback();
-//            }).catch(function (err) {
-//                logger.error('count new db postgresql users failed: ' + err);
-//                return callback(err);
-//            });
-//        });
+        async.forEachOfSeries(notes, function (note, key, _callback) {
+            var where = null;
+            if (models.Note.checkNoteIdValid(note.id)) {
+                where = {
+                    id: note.id
+                };
+            } else {
+                where = {
+                    alias: note.id
+                };
+            }
+            var defaults = util._extend(where, {
+                viewcount: note.viewcount,
+                createdAt: note.created,
+                updatedAt: note.updated
+            });
+            if (note.shortid) {
+                defaults.shortid = note.shortid;
+            }
+            if (note.permission) {
+                defaults.permission = note.permission;
+            }
+            // if lastchangeuser exists, find coressponding new user and replace to its new id
+            if (note.lastchangeuser) {
+                models.User.findOne({
+                    profileid: note.lastchangeuser.id
+                }).then(function (_user) {
+                    if (!_user) return _callback();
+                    defaults.lastchangeuserId = _user.id;
+                    models.Note.findOrCreate({
+                        where: where,
+                        defaults: defaults,
+                        silent: true
+                    }).spread(function (note, created) {
+                        if (!created) {
+                            logger.info('note already exists: ' + note.id);
+                        }
+                        return _callback();
+                    }).catch(function (err) {
+                        return _callback(err);
+                    });
+                }).catch(function (err) {
+                    return _callback(err);
+                });
+            } else {
+                models.Note.findOrCreate({
+                    where: where,
+                    defaults: defaults,
+                    silent: true
+                }).spread(function (note, created) {
+                    if (!created) {
+                        logger.info('note already exists: ' + note.id);
+                    }
+                    return _callback();
+                }).catch(function (err) {
+                    return _callback(err);
+                });
+            }
+        }, function (err) {
+            if (err) {
+                logger.error('migrate notes failed: ' + err);
+                return callback(err);
+            }
+            models.Note.count().then(function (count) {
+                logger.info('migrate notes success: ' + count + '/' + notes.length);
+                return callback();
+            }).catch(function (err) {
+                logger.error('count new db postgresql notes failed: ' + err);
+                return callback(err);
+            });
+        });
     });
 }
 
-// notes
+// notes from postgresql
 function migrateNotesFromPostgreSQL(callback) {
     logger.info('> migrate notes from old db postgresql to new db postgresql');
     var client = new pg.Client(config.old_db_postgresql);
