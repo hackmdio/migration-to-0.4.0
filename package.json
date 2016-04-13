@@ -12,6 +12,7 @@
     "async": "^1.5.2",
     "connect-session-sequelize": "^3.0.0",
     "express-session": "^1.13.0",
+    "lz-string": "1.4.4",
     "mongodb": "^2.1.16",
     "mongoose": "^4.4.7",
     "pg": "4.x",

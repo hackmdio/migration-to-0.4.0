@@ -7,6 +7,7 @@ var pg = require('pg');
 var session = require('express-session');
 var MongoClient = require('mongodb').MongoClient;
 var SequelizeStore = require('connect-session-sequelize')(session.Store);
+var LZString = require('lz-string');
 
 // core
 var config = require("./config.js");
@@ -211,53 +212,47 @@ function migrateNotesFromMongoDB(callback) {
                     alias: note.id
                 };
             }
-            var defaults = util._extend(where, {
+            var defaults = util._extend({
                 viewcount: note.viewcount,
                 createdAt: note.created,
                 updatedAt: note.updated
-            });
+            }, where);
             if (note.shortid) {
                 defaults.shortid = note.shortid;
             }
             if (note.permission) {
                 defaults.permission = note.permission;
             }
-            // if lastchangeuser exists, find coressponding new user and replace to its new id
-            if (note.lastchangeuser) {
-                models.User.findOne({
-                    profileid: note.lastchangeuser.id
-                }).then(function (_user) {
-                    if (!_user) return _callback();
-                    defaults.lastchangeuserId = _user.id;
-                    models.Note.findOrCreate({
-                        where: where,
-                        defaults: defaults,
-                        silent: true
-                    }).spread(function (note, created) {
-                        if (!created) {
-                            logger.info('note already exists: ' + note.id);
-                        }
-                        return _callback();
+            models.Note.findOrCreate({
+                where: where,
+                defaults: defaults,
+                silent: true
+            }).spread(function (_note, created) {
+                if (!created) {
+                    logger.info('note already exists: ' + _note.id);
+                }
+                // if lastchangeuser exists, find coressponding new user and replace to its new id
+                if (note.lastchangeuser && !_note.lastchangeuserId) {
+                    models.User.findOne({
+                        profileid: note.lastchangeuser.id
+                    }).then(function (_user) {
+                        if (!_user) return _callback();
+                        _note.update({
+                            lastchangeuserId: _user.id
+                        }).then(function (_note) {
+                            return _callback();
+                        }).catch(function (err) {
+                            return _callback(err);
+                        });
                     }).catch(function (err) {
                         return _callback(err);
                     });
-                }).catch(function (err) {
-                    return _callback(err);
-                });
-            } else {
-                models.Note.findOrCreate({
-                    where: where,
-                    defaults: defaults,
-                    silent: true
-                }).spread(function (note, created) {
-                    if (!created) {
-                        logger.info('note already exists: ' + note.id);
-                    }
+                } else {
                     return _callback();
-                }).catch(function (err) {
-                    return _callback(err);
-                });
-            }
+                }
+            }).catch(function (err) {
+                return _callback(err);
+            });
         }, function (err) {
             if (err) {
                 logger.error('migrate notes failed: ' + err);
@@ -291,16 +286,93 @@ function migrateNotesFromPostgreSQL(callback) {
                 logger.error('select notes in the old db postgresql failed: ' + err);
                 return callback(err);
             }
-            if (result.rows.length <= 0) {
+            var notes = result.rows;
+            if (notes.length <= 0) {
                 logger.info('not found any notes!');
                 return callback();
             } else {
-                logger.info('found ' + result.rows.length + ' notes!');
-                return callback();
-//                    for (var i = 0, l = result.rows.length; i < l; i++) {
-//                        var note = result.rows[i];
-//                        // find or create owner
-//                    }
+                logger.info('found ' + notes.length + ' notes!');
+                async.forEachOfSeries(notes, function (note, key, _callback) {
+                    var where = null;
+                    if (models.Note.checkNoteIdValid(note.id)) {
+                        where = {
+                            id: note.id
+                        };
+                    } else {
+                        where = {
+                            alias: note.id
+                        };
+                    }
+                    var values = util._extend({
+                        title: note.title,
+                        content: note.content
+                    }, where);
+                    // if note title is not compressed, do it now
+                    if (values.title) {
+                        var title = LZString.decompressFromBase64(values.title);
+                        if (!title) {
+                            values.title = LZString.compressToBase64(note.title);
+                        }
+                    }
+                    models.Note.findOrCreate({
+                        where: where
+                    }).spread(function (_note, created) {
+                        if (!created) {
+                            logger.info('note already exists: ' + note.id);
+                        }
+                        values.lastchangeAt = note.update_time;
+                        if (_note.createdAt > note.create_time) {
+                            values.createdAt = note.create_time;
+                        }
+                        if (_note.updatedAt < note.update_time) {
+                            values.updatedAt = note.update_time;
+                        }
+                        // every note should have permission
+                        if (!_note.permission) {
+                            if (note.owner && note.owner !== "null") {
+                                values.permission = 'editable';
+                            } else {
+                                values.permission = 'freely';
+                            }
+                        }
+                        // if owner exists, find coressponding new user and replace to its new id
+                        if (note.owner && note.owner !== "null" && !_note.ownerId) {
+                            models.User.findOne({
+                                profileid: note.owner
+                            }).then(function (_user) {
+                                if (!_user) return _callback();
+                                values.ownerId = _user.id;
+                                _note.update(values).then(function (_note) {
+                                    return _callback();
+                                }).catch(function (err) {
+                                    return _callback(err);
+                                });
+                            }).catch(function (err) {
+                                return _callback(err);
+                            });
+                        } else {
+                            _note.update(values).then(function (_note) {
+                                return _callback();
+                            }).catch(function (err) {
+                                return _callback(err);
+                            });
+                        }
+                    }).catch(function (err) {
+                        return _callback(err);
+                    });
+                }, function (err) {
+                    if (err) {
+                        logger.error('migrate notes failed: ' + err);
+                        return callback(err);
+                    }
+                    models.Note.count().then(function (count) {
+                        logger.info('migrate notes success: ' + count + '/' + notes.length);
+                        return callback();
+                    }).catch(function (err) {
+                        logger.error('count new db postgresql notes failed: ' + err);
+                        return callback(err);
+                    });
+                });
             }
         });
     });
