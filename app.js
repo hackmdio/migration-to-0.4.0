@@ -226,8 +226,8 @@ function migrateNotesFromMongoDB(callback) {
             }
             var defaults = util._extend({
                 viewcount: note.viewcount,
-                createdAt: note.created,
-                updatedAt: note.updated
+                createdAt: note.created || Date.now(),
+                updatedAt: note.updated || Date.now()
             }, where);
             if (note.shortid) {
                 defaults.shortid = note.shortid;
@@ -327,8 +327,8 @@ function migrateNotesFromPostgreSQL(callback) {
                     var values = util._extend({
                         title: note.title,
                         content: note.content,
-                        createdAt: note.create_time,
-                        updatedAt: note.update_time
+                        createdAt: note.create_time || Date.now(),
+                        updatedAt: note.update_time || Date.now()
                     }, where);
                     // if note title is not compressed, do it now
                     if (values.title) {
