@@ -452,7 +452,9 @@ models.sequelize.sync().then(function () {
         logger.info('connect to old db postgresql success!');
         logger.info('---start migration---');
         async.series({
-            migrateSessions: migrateSessions,
+            // seems like because the user id is different
+            // even migrate sessions won't work, drop it
+            //migrateSessions: migrateSessions,
             migrateTemps: migrateTemps,
             migrateUsers: migrateUsers,
             migrateNotesFromMongoDB: migrateNotesFromMongoDB,
