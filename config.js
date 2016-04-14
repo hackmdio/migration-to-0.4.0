@@ -1,9 +1,9 @@
 //config
 var path = require('path');
 
-var old_db_mongodb = 'mongodb://localhost/hackmd';
-var old_db_postgresql = 'postgresql://localhost:5432/hackmd';
-var new_db_postgresql = 'postgresql://localhost:5432/hackmd';
+var old_db_mongodb = 'change this';
+var old_db_postgresql = 'change this';
+var new_db_postgresql = 'change this';
 
 var config = {
     old_db_mongodb: process.env.OLD_DB_MONGODB || old_db_mongodb,
