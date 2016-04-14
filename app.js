@@ -3,6 +3,7 @@
 var util = require('util');
 var async = require('async');
 var mongoose = require('mongoose');
+var ObjectId = mongoose.Types.ObjectId;
 var pg = require('pg');
 var session = require('express-session');
 var MongoClient = require('mongodb').MongoClient;
@@ -234,11 +235,15 @@ function migrateNotesFromMongoDB(callback) {
                 // if lastchangeuser exists, find coressponding new user and replace to its new id
                 if (note.lastchangeuser && !_note.lastchangeuserId) {
                     models.User.findOne({
-                        profileid: note.lastchangeuser.id
+                        where: {
+                            profileid: note.lastchangeuser.id
+                        }
                     }).then(function (_user) {
                         if (!_user) return _callback();
                         _note.update({
                             lastchangeuserId: _user.id
+                        }, {
+                            silent: true
                         }).then(function (_note) {
                             return _callback();
                         }).catch(function (err) {
@@ -305,7 +310,10 @@ function migrateNotesFromPostgreSQL(callback) {
                     }
                     var values = util._extend({
                         title: note.title,
-                        content: note.content
+                        content: note.content,
+                        lastchangeAt: note.update_time,
+                        createdAt: note.create_time,
+                        updatedAt: note.update_time
                     }, where);
                     // if note title is not compressed, do it now
                     if (values.title) {
@@ -315,7 +323,9 @@ function migrateNotesFromPostgreSQL(callback) {
                         }
                     }
                     models.Note.findOrCreate({
-                        where: where
+                        where: where,
+                        defaults: values,
+                        silent: true
                     }).spread(function (_note, created) {
                         if (!created) {
                             logger.info('note already exists: ' + note.id);
@@ -336,26 +346,30 @@ function migrateNotesFromPostgreSQL(callback) {
                             }
                         }
                         // if owner exists, find coressponding new user and replace to its new id
-                        if (note.owner && note.owner !== "null" && !_note.ownerId) {
-                            models.User.findOne({
-                                profileid: note.owner
-                            }).then(function (_user) {
-                                if (!_user) return _callback();
-                                values.ownerId = _user.id;
-                                _note.update(values).then(function (_note) {
-                                    return _callback();
-                                }).catch(function (err) {
-                                    return _callback(err);
-                                });
-                            }).catch(function (err) {
-                                return _callback(err);
+                        if (note.owner && note.owner !== "null" && ObjectId.isValid(note.owner) && !_note.ownerId) {
+                            // from mongodb
+                            User.model.findOne({
+                                _id: new ObjectId(note.owner)
+                            }, function (err, user) {
+                                if (err) return _callback(err);
+                                if (user) {
+                                    // from new postgresql db
+                                    models.User.findOne({
+                                        where: {
+                                            profileid: user.id
+                                        }
+                                    }).then(function (_user) {
+                                        if (_user) values.ownerId = _user.id;
+                                        noteUpdate(values, _note, _callback);
+                                    }).catch(function (err) {
+                                        return _callback(err);
+                                    });
+                                } else {
+                                    noteUpdate(values, _note, _callback);
+                                }
                             });
                         } else {
-                            _note.update(values).then(function (_note) {
-                                return _callback();
-                            }).catch(function (err) {
-                                return _callback(err);
-                            });
+                            noteUpdate(values, _note, _callback);
                         }
                     }).catch(function (err) {
                         return _callback(err);
@@ -375,6 +389,16 @@ function migrateNotesFromPostgreSQL(callback) {
                 });
             }
         });
+    });
+}
+
+function noteUpdate(values, _note, _callback) {
+    _note.update(values, {
+        silent: true
+    }).then(function (_note) {
+        return _callback();
+    }).catch(function (err) {
+        return _callback(err);
     });
 }
 
