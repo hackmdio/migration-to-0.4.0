@@ -321,6 +321,10 @@ function migrateNotesFromPostgreSQL(callback) {
                         if (!title) {
                             values.title = LZString.compressToBase64(note.title);
                         }
+                    } else {
+                        var body = LZString.decompressFromBase64(note.content);
+                        var title = models.Note.parseNoteTitle(body);
+                        values.title = LZString.compressToBase64(title);
                     }
                     models.Note.findOrCreate({
                         where: where,
