@@ -3,6 +3,7 @@
 var util = require('util');
 var async = require('async');
 var mongoose = require('mongoose');
+var moment = require('moment');
 var ObjectId = mongoose.Types.ObjectId;
 var pg = require('pg');
 var session = require('express-session');
@@ -311,7 +312,6 @@ function migrateNotesFromPostgreSQL(callback) {
                     var values = util._extend({
                         title: note.title,
                         content: note.content,
-                        lastchangeAt: note.update_time,
                         createdAt: note.create_time,
                         updatedAt: note.update_time
                     }, where);
@@ -334,11 +334,17 @@ function migrateNotesFromPostgreSQL(callback) {
                         if (!created) {
                             logger.info('note already exists: ' + note.id);
                         }
-                        values.lastchangeAt = note.update_time;
-                        if (_note.createdAt > note.create_time) {
+                        var create_time = moment(note.create_time);
+                        var update_time = moment(note.update_time);
+                        if (!create_time.isSame(update_time)) {
+                            values.lastchangeAt = note.update_time;
+                        }
+                        var createdAt = moment(_note.createdAt);
+                        var updatedAt = moment(_note.updatedAt);
+                        if (createdAt.isAfter(create_time)) {
                             values.createdAt = note.create_time;
                         }
-                        if (_note.updatedAt < note.update_time) {
+                        if (updatedAt.isBefore(update_time)) {
                             values.updatedAt = note.update_time;
                         }
                         // every note should have permission
