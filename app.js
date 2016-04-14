@@ -34,6 +34,13 @@ var sessionStore = new SequelizeStore({
     db: models.sequelize
 });
 
+function showProgress(index, total, name) {
+    // show every 100 counts
+    if (index % 100 == 0) {
+        logger.info('migrate ' + name + ' processing: ' + index + '/' + total);
+    }
+}
+
 // sessions
 function migrateSessions(callback) {
     logger.info('> migrate sessions from old db mongodb to new db postgresql');
@@ -70,6 +77,7 @@ function migrateSessions(callback) {
                     if (!created) {
                         logger.info('session already exists: ' + session.sid);
                     }
+                    showProgress(key, sessions.length, 'sessions');
                     return _callback();
                 }).catch(function (err) {
                     return _callback(err);
@@ -120,6 +128,7 @@ function migrateTemps(callback) {
                 if (!created) {
                     logger.info('temp already exists: ' + temp.id);
                 }
+                showProgress(key, temps.length, 'temps');
                 return _callback();
             }).catch(function (err) {
                 return _callback(err);
@@ -170,6 +179,7 @@ function migrateUsers(callback) {
                 if (!created) {
                     logger.info('user already exists: ' + user.profileid);
                 }
+                showProgress(key, users.length, 'users');
                 return _callback();
             }).catch(function (err) {
                 return _callback(err);
@@ -240,12 +250,16 @@ function migrateNotesFromMongoDB(callback) {
                             profileid: note.lastchangeuser.id
                         }
                     }).then(function (_user) {
-                        if (!_user) return _callback();
+                        if (!_user) {
+                            showProgress(key, notes.length, 'notes');
+                            return _callback();
+                        }
                         _note.update({
                             lastchangeuserId: _user.id
                         }, {
                             silent: true
                         }).then(function (_note) {
+                            showProgress(key, notes.length, 'notes');
                             return _callback();
                         }).catch(function (err) {
                             return _callback(err);
@@ -254,6 +268,7 @@ function migrateNotesFromMongoDB(callback) {
                         return _callback(err);
                     });
                 } else {
+                    showProgress(key, notes.length, 'notes');
                     return _callback();
                 }
             }).catch(function (err) {
@@ -370,15 +385,18 @@ function migrateNotesFromPostgreSQL(callback) {
                                         }
                                     }).then(function (_user) {
                                         if (_user) values.ownerId = _user.id;
+                                        showProgress(key, notes.length, 'notes');
                                         noteUpdate(values, _note, _callback);
                                     }).catch(function (err) {
                                         return _callback(err);
                                     });
                                 } else {
+                                    showProgress(key, notes.length, 'notes');
                                     noteUpdate(values, _note, _callback);
                                 }
                             });
                         } else {
+                            showProgress(key, notes.length, 'notes');
                             noteUpdate(values, _note, _callback);
                         }
                     }).catch(function (err) {
