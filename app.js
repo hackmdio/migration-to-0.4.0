@@ -6,9 +6,6 @@ var mongoose = require('mongoose');
 var moment = require('moment');
 var ObjectId = mongoose.Types.ObjectId;
 var pg = require('pg');
-var session = require('express-session');
-var MongoClient = require('mongodb').MongoClient;
-var SequelizeStore = require('connect-session-sequelize')(session.Store);
 var LZString = require('lz-string');
 
 // core
@@ -29,74 +26,11 @@ var Temp = require("./lib/temp.js");
 // new models
 var models = require("./lib/models");
 
-// session store
-var sessionStore = new SequelizeStore({
-    db: models.sequelize
-});
-
 function showProgress(index, total, name) {
     // show every 100 counts
     if (index % 100 == 0) {
         logger.info('migrate ' + name + ' processing: ' + index + '/' + total);
     }
-}
-
-// sessions
-function migrateSessions(callback) {
-    logger.info('> migrate sessions from old db mongodb to new db postgresql');
-    MongoClient.connect(config.old_db_mongodb, function(err, db) {
-        if (err) {
-            logger.error('connect to old db mongodb failed: ' + err);
-            return callback(err);
-        }
-        var sessionCollection = db.collection('sessions');
-        sessionCollection.find({}).sort({lastModified: 1}).toArray(function(err, sessions) {
-            if (err) {
-                logger.error('find sessions in old db mongodb failed: ' + err);
-                return callback(err);
-            }
-            if (sessions.length <= 0) {
-                logger.info('not found any sessions!');
-                return callback();
-            }
-            logger.info('found ' + sessions.length + ' sessions!');
-            async.forEachOfSeries(sessions, function (session, key, _callback) {
-                sessionStore.sessionModel.findOrCreate({
-                    where: {
-                        sid: session._id
-                    },
-                    defaults: {
-                        sid: session._id,
-                        expires: session.expires,
-                        data: session.session,
-                        createdAt: session.lastModified,
-                        updatedAt: session.lastModified
-                    },
-                    silent: true
-                }).spread(function (session, created) {
-                    if (!created) {
-                        logger.info('session already exists: ' + session.sid);
-                    }
-                    showProgress(key, sessions.length, 'sessions');
-                    return _callback();
-                }).catch(function (err) {
-                    return _callback(err);
-                });
-            }, function (err) {
-                if (err) {
-                    logger.error('migrate sessions failed: ' + err);
-                    return callback(err);
-                }
-                sessionStore.sessionModel.count().then(function (count) {
-                    logger.info('migrate sessions success: ' + count + '/' + sessions.length);
-                    return callback();
-                }).catch(function (err) {
-                    logger.error('count new db postgresql sessions failed: ' + err);
-                    return callback(err);
-                });
-            });
-        });
-    });
 }
 
 // temps
@@ -452,9 +386,6 @@ models.sequelize.sync().then(function () {
         logger.info('connect to old db postgresql success!');
         logger.info('---start migration---');
         async.series({
-            // seems like because the user id is different
-            // even migrate sessions won't work, drop it
-            //migrateSessions: migrateSessions,
             migrateTemps: migrateTemps,
             migrateUsers: migrateUsers,
             migrateNotesFromMongoDB: migrateNotesFromMongoDB,
