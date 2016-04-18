@@ -12,7 +12,7 @@ var LZString = require('lz-string');
 var config = require("./config.js");
 var logger = require("./lib/logger.js");
 
-if (!config.old_db_mongodb || !config.old_db_mongodb || !config.new_db_postgresql) {
+if (!config.old_db_mongodb || !config.old_db_mongodb || !config.new_db) {
     logger.error('you must provide all the db connection strings!');
     return;
 }
@@ -35,7 +35,7 @@ function showProgress(index, total, name) {
 
 // temps
 function migrateTemps(callback) {
-    logger.info('> migrate temps from old db mongodb to new db postgresql');
+    logger.info('> migrate temps from old db mongodb to new db');
     Temp.model.find({}).sort({created: 1}).exec(function (err, temps) {
         if (err) {
             logger.error('find temps in old db mongodb failed: ' + err);
@@ -76,7 +76,7 @@ function migrateTemps(callback) {
                 logger.info('migrate temps success: ' + count + '/' + temps.length);
                 return callback();
             }).catch(function (err) {
-                logger.error('count new db postgresql temps failed: ' + err);
+                logger.error('count new db temps failed: ' + err);
                 return callback(err);
             });
         });
@@ -85,7 +85,7 @@ function migrateTemps(callback) {
 
 // users
 function migrateUsers(callback) {
-    logger.info('> migrate users from old db mongodb to new db postgresql');
+    logger.info('> migrate users from old db mongodb to new db');
     User.model.find({}).sort({created: 1}).exec(function (err, users) {
         if (err) {
             logger.error('find users in old db mongodb failed: ' + err);
@@ -127,7 +127,7 @@ function migrateUsers(callback) {
                 logger.info('migrate users success: ' + count + '/' + users.length);
                 return callback();
             }).catch(function (err) {
-                logger.error('count new db postgresql users failed: ' + err);
+                logger.error('count new db users failed: ' + err);
                 return callback(err);
             });
         });
@@ -136,7 +136,7 @@ function migrateUsers(callback) {
 
 // notes from mongodb
 function migrateNotesFromMongoDB(callback) {
-    logger.info('> migrate notes from old db mongodb to new db postgresql');
+    logger.info('> migrate notes from old db mongodb to new db');
     Note.model.find({}).populate('lastchangeuser').sort({created: 1}).exec(function (err, notes) {
         if (err) {
             logger.error('find notes in old db mongodb failed: ' + err);
@@ -217,7 +217,7 @@ function migrateNotesFromMongoDB(callback) {
                 logger.info('migrate notes success: ' + count + '/' + notes.length);
                 return callback();
             }).catch(function (err) {
-                logger.error('count new db postgresql notes failed: ' + err);
+                logger.error('count new db notes failed: ' + err);
                 return callback(err);
             });
         });
@@ -226,7 +226,7 @@ function migrateNotesFromMongoDB(callback) {
 
 // notes from postgresql
 function migrateNotesFromPostgreSQL(callback) {
-    logger.info('> migrate notes from old db postgresql to new db postgresql');
+    logger.info('> migrate notes from old db postgresql to new db');
     var client = new pg.Client(config.old_db_postgresql);
     client.connect(function (err) {
         if (err) {
@@ -312,7 +312,7 @@ function migrateNotesFromPostgreSQL(callback) {
                             }, function (err, user) {
                                 if (err) return _callback(err);
                                 if (user) {
-                                    // from new postgresql db
+                                    // from new db
                                     models.User.findOne({
                                         where: {
                                             profileid: user.id
@@ -345,7 +345,7 @@ function migrateNotesFromPostgreSQL(callback) {
                         logger.info('migrate notes success: ' + count + '/' + notes.length);
                         return callback();
                     }).catch(function (err) {
-                        logger.error('count new db postgresql notes failed: ' + err);
+                        logger.error('count new db notes failed: ' + err);
                         return callback(err);
                     });
                 });
@@ -366,7 +366,7 @@ function noteUpdate(values, _note, _callback) {
 
 // sync new db models
 models.sequelize.sync().then(function () {
-    logger.info('connect to new db postgresql and sync success!');
+    logger.info('connect to new db and sync success!');
     // connect to the old db mongodb
     try {
         mongoose.connect(config.old_db_mongodb);
